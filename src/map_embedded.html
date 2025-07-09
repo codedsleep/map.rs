@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Map.rs</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css" />
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -webkit-system-ui, system-ui, sans-serif;
+        }
+        #map {
+            height: 100vh;
+            width: 100vw;
+        }
+        .leaflet-control-custom {
+            background: rgba(255, 255, 255, 0.9);
+            padding: 8px;
+            border-radius: 4px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            font-size: 12px;
+            line-height: 1.4;
+        }
+        .coordinates-display {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 3px;
+            font-family: monospace;
+            font-size: 11px;
+            z-index: 1000;
+        }
+        .route-info {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            max-width: 250px;
+            font-size: 12px;
+            z-index: 1000;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div class="coordinates-display" id="coordinates">Click on map to see coordinates</div>
+    <div class="route-info" id="routeInfo">
+        <strong>Route Information</strong>
+        <div id="routeDetails"></div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.min.js"></script>
+    <script>
+        console.log('🗺️ Initializing OSM Map...');
+        
+        // Initialize the map
+        window.mapInstance = L.map('map').setView([51.505, -0.09], 13);
+
+        // Add OpenStreetMap tiles
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            maxZoom: 19
+        }).addTo(window.mapInstance);
+
+        // Variables for markers and routes
+        window.currentLocationMarker = null;
+        window.searchMarkers = [];
+        window.routeControl = null;
+        window.clickMarkers = [];
+        
+        // Coordinates display element
+        const coordsDisplay = document.getElementById('coordinates');
+        const routeInfo = document.getElementById('routeInfo');
+        const routeDetails = document.getElementById('routeDetails');
+
+        // Click handler for map
+        window.mapInstance.on('click', function(e) {
+            const lat = e.latlng.lat;
+            const lng = e.latlng.lng;
+            
+            // Update coordinates display
+            coordsDisplay.textContent = `Lat: ${lat.toFixed(6)}, Lng: ${lng.toFixed(6)}`;
+            
+            // Add click marker
+            const marker = L.marker([lat, lng]).addTo(window.mapInstance);
+            window.clickMarkers.push(marker);
+            
+            // Send to Rust backend if available
+            if (window.rustBackend) {
+                window.rustBackend.onLocationClick(lat, lng);
+            }
+            
+            console.log(`Map clicked: ${lat.toFixed(6)}, ${lng.toFixed(6)}`);
+        });
+
+        // Mouse move handler for coordinates
+        window.mapInstance.on('mousemove', function(e) {
+            const lat = e.latlng.lat;
+            const lng = e.latlng.lng;
+            coordsDisplay.textContent = `Lat: ${lat.toFixed(6)}, Lng: ${lng.toFixed(6)}`;
+        });
+
+        // Geolocation success handler
+        function onLocationFound(e) {
+            const lat = e.latlng.lat;
+            const lng = e.latlng.lng;
+            const accuracy = e.accuracy;
+
+            // Remove previous location marker
+            if (window.currentLocationMarker) {
+                window.mapInstance.removeLayer(window.currentLocationMarker);
+            }
+
+            // Add new location marker with accuracy circle
+            window.currentLocationMarker = L.marker([lat, lng]).addTo(window.mapInstance)
+                .bindPopup(`You are within ${Math.round(accuracy)} meters from this point`)
+                .openPopup();
+
+            L.circle([lat, lng], {
+                radius: accuracy,
+                fillColor: '#007cba',
+                fillOpacity: 0.1,
+                color: '#007cba',
+                weight: 1
+            }).addTo(window.mapInstance);
+
+            // Center map on location
+            window.mapInstance.setView([lat, lng], 16);
+            
+            // Send to Rust backend
+            if (window.rustBackend) {
+                window.rustBackend.onLocationUpdate({
+                    lat: lat,
+                    lng: lng,
+                    accuracy: accuracy
+                });
+            }
+            
+            console.log(`Location found: ${lat.toFixed(6)}, ${lng.toFixed(6)} ±${Math.round(accuracy)}m`);
+        }
+
+        // Geolocation error handler
+        function onLocationError(e) {
+            console.log('Location error:', e.message);
+            
+            // Fallback to simulated location (London)
+            const lat = 51.5074;
+            const lng = -0.1278;
+            
+            // Remove previous location marker
+            if (window.currentLocationMarker) {
+                window.mapInstance.removeLayer(window.currentLocationMarker);
+            }
+            
+            // Add simulated location marker
+            window.currentLocationMarker = L.marker([lat, lng]).addTo(window.mapInstance)
+                .bindPopup('Simulated Location (London)<br><small>Real location permission denied</small>')
+                .openPopup();
+            
+            // Center map on location
+            window.mapInstance.setView([lat, lng], 13);
+            
+            console.log('Using simulated location: London');
+        }
+
+        window.mapInstance.on('locationfound', onLocationFound);
+        window.mapInstance.on('locationerror', onLocationError);
+
+        // Function to get current location
+        window.getCurrentLocation = function() {
+            console.log('🔍 Requesting current location...');
+            window.mapInstance.locate({
+                setView: true,
+                maxZoom: 16,
+                enableHighAccuracy: true,
+                timeout: 10000,
+                maximumAge: 60000
+            });
+        };
+
+        // Function to add route to map
+        window.addRouteToMap = function(routeGeoJson) {
+            try {
+                console.log('🛣️ Adding route to map...');
+                
+                // Remove existing route
+                if (window.routeControl) {
+                    window.mapInstance.removeControl(window.routeControl);
+                    window.routeControl = null;
+                }
+
+                // Parse GeoJSON if it's a string
+                let geoJsonData;
+                if (typeof routeGeoJson === 'string') {
+                    geoJsonData = JSON.parse(routeGeoJson);
+                } else {
+                    geoJsonData = routeGeoJson;
+                }
+
+                // Add route to map
+                const routeLayer = L.geoJSON(geoJsonData, {
+                    style: {
+                        color: '#007cba',
+                        weight: 5,
+                        opacity: 0.8,
+                        lineJoin: 'round',
+                        lineCap: 'round'
+                    }
+                }).addTo(window.mapInstance);
+
+                // Fit map to route bounds
+                window.mapInstance.fitBounds(routeLayer.getBounds(), {
+                    padding: [20, 20]
+                });
+
+                // Show route info
+                routeInfo.style.display = 'block';
+                
+                console.log('✅ Route added successfully');
+                
+            } catch (error) {
+                console.error('❌ Error adding route:', error);
+            }
+        };
+
+        // Function to clear all markers and routes
+        window.clearMap = function() {
+            console.log('🧹 Clearing map...');
+            
+            // Clear click markers
+            window.clickMarkers.forEach(marker => window.mapInstance.removeLayer(marker));
+            window.clickMarkers = [];
+            
+            // Clear search markers
+            window.searchMarkers.forEach(marker => window.mapInstance.removeLayer(marker));
+            window.searchMarkers = [];
+            
+            // Clear current location marker
+            if (window.currentLocationMarker) {
+                window.mapInstance.removeLayer(window.currentLocationMarker);
+                window.currentLocationMarker = null;
+            }
+            
+            // Clear route
+            if (window.routeControl) {
+                window.mapInstance.removeControl(window.routeControl);
+                window.routeControl = null;
+            }
+            
+            // Hide route info
+            routeInfo.style.display = 'none';
+            
+            // Clear all layers except the base tile layer
+            window.mapInstance.eachLayer(function(layer) {
+                if (layer !== window.mapInstance._layers[Object.keys(window.mapInstance._layers)[0]]) {
+                    if (layer instanceof L.Marker || layer instanceof L.Path || layer instanceof L.Circle) {
+                        window.mapInstance.removeLayer(layer);
+                    }
+                }
+            });
+            
+            console.log('✅ Map cleared');
+        };
+
+        // Function to add marker with popup
+        window.addMarker = function(lat, lng, popupText, options = {}) {
+            const marker = L.marker([lat, lng], options).addTo(window.mapInstance);
+            if (popupText) {
+                marker.bindPopup(popupText);
+            }
+            window.searchMarkers.push(marker);
+            return marker;
+        };
+
+        // Function to show route information
+        window.showRouteInfo = function(distance, duration, instructions) {
+            const distanceKm = (distance / 1000).toFixed(1);
+            const durationMin = Math.round(duration / 60);
+            
+            routeDetails.innerHTML = `
+                <div><strong>Distance:</strong> ${distanceKm} km</div>
+                <div><strong>Duration:</strong> ${durationMin} minutes</div>
+                <div><strong>Instructions:</strong> ${instructions.length} steps</div>
+            `;
+            
+            routeInfo.style.display = 'block';
+        };
+
+        // Initialize map with default view
+        function initializeMap() {
+            // Set default view to London
+            window.mapInstance.setView([51.505, -0.09], 13);
+            
+            // Add a welcome message
+            L.popup()
+                .setLatLng([51.505, -0.09])
+                .setContent("🗺️ Welcome to Map.rs!<br>Click anywhere to place markers")
+                .openOn(window.mapInstance);
+                
+            console.log('✅ Map initialized successfully');
+        }
+
+        // Wait for Rust backend to be ready
+        window.addEventListener('load', function() {
+            console.log('📍 Map ready - waiting for Rust backend...');
+            
+            // Initialize map immediately
+            initializeMap();
+            
+            // Try to get user's location after a short delay
+            setTimeout(() => {
+                if (navigator.geolocation) {
+                    console.log('🌐 Browser geolocation available - attempting to get location...');
+                    window.getCurrentLocation();
+                } else {
+                    console.log('❌ Browser geolocation not available');
+                }
+            }, 2000);
+        });
+        
+        console.log('✅ Map initialization complete');
+    </script>
+</body>
+</html>

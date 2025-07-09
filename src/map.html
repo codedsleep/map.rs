@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Map.rs</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+        }
+        #map {
+            height: 100vh;
+            width: 100vw;
+        }
+        .info-panel {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            z-index: 1000;
+            max-width: 200px;
+        }
+        .control-panel {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            z-index: 1000;
+        }
+        button {
+            margin: 2px;
+            padding: 5px 10px;
+            border: none;
+            border-radius: 3px;
+            background: #007cba;
+            color: white;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #005a87;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div class="info-panel" id="info">
+        <strong>Map.rs</strong><br>
+        Click on the map to add markers<br>
+        <small>Add 2+ markers, then click "Plan Route"</small>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // Initialize the map
+        var map = L.map('map').setView([51.505, -0.09], 13);
+        window.mapInstance = map; // Make map globally accessible
+
+        // Add OpenStreetMap tiles
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
+
+        // Variables for markers and routing
+        var currentLocationMarker = null;
+        var clickMarkers = [];
+        var routeControl = null;
+        var routeLayer = null;
+        
+        // Make clickMarkers globally accessible
+        window.clickMarkers = clickMarkers;
+
+        // Click handler for map
+        map.on('click', function(e) {
+            var lat = e.latlng.lat.toFixed(6);
+            var lng = e.latlng.lng.toFixed(6);
+            
+            // Update info panel
+            document.getElementById('info').innerHTML = 
+                '<strong>Coordinates:</strong><br>' +
+                'Lat: ' + lat + '<br>' +
+                'Lng: ' + lng;
+
+            // Add marker
+            var marker = L.marker([lat, lng]).addTo(map);
+            clickMarkers.push(marker);
+            window.clickMarkers = clickMarkers; // Keep global reference updated
+
+            // Send coordinates to Rust backend (if connected)
+            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.mapClick) {
+                window.webkit.messageHandlers.mapClick.postMessage({
+                    lat: parseFloat(lat),
+                    lng: parseFloat(lng)
+                });
+            }
+        });
+
+        // Get current location
+        function getCurrentLocation() {
+            if (window.rustBackend && window.rustBackend.onLocationUpdate) {
+                // Simulate a location update (London)
+                window.rustBackend.onLocationUpdate({lat: 51.5074, lng: -0.1278, accuracy: 10});
+            } else {
+                alert('Rust backend not connected');
+            }
+        }
+
+        // Search location (placeholder)
+        function searchLocation() {
+            var query = prompt('Enter location to search:');
+            if (query && window.rustBackend && window.rustBackend.sendMessage) {
+                window.rustBackend.sendMessage('search_location', { query: query });
+            } else if (!window.rustBackend) {
+                alert('Rust backend not connected');
+            }
+        }
+
+        // Plan route (placeholder)
+        function planRoute() {
+            if (window.rustBackend && window.rustBackend.sendMessage) {
+                window.rustBackend.sendMessage('plan_route', {});
+            } else {
+                alert('Rust backend not connected');
+            }
+        }
+
+        // Function to add route to map from GeoJSON
+        function addRouteToMap(geoJsonString) {
+            try {
+                var geoJson = JSON.parse(geoJsonString);
+                
+                // Remove existing route if any
+                if (routeLayer) {
+                    map.removeLayer(routeLayer);
+                }
+                
+                // Add new route
+                routeLayer = L.geoJSON(geoJson, {
+                    style: {
+                        color: '#007cba',
+                        weight: 5,
+                        opacity: 0.8
+                    }
+                }).addTo(map);
+                
+                // Fit map to route bounds
+                map.fitBounds(routeLayer.getBounds());
+                
+                console.log('✅ Route added to map');
+            } catch (e) {
+                console.error('❌ Error adding route to map:', e);
+            }
+        }
+        
+        // Function to clear all map elements
+        function clearMap() {
+            // Clear all click markers
+            clickMarkers.forEach(marker => map.removeLayer(marker));
+            clickMarkers = [];
+            window.clickMarkers = []; // Update global reference
+            
+            // Clear current location marker
+            if (currentLocationMarker) {
+                map.removeLayer(currentLocationMarker);
+                currentLocationMarker = null;
+            }
+            
+            // Clear route
+            if (routeLayer) {
+                map.removeLayer(routeLayer);
+                routeLayer = null;
+            }
+            
+            // Reset info panel
+            document.getElementById('info').innerHTML = 
+                '<strong>Map.rs</strong><br>Click on the map to add markers<br><small>Add 2+ markers, then click "Plan Route"</small>';
+            
+            console.log('✅ Map cleared');
+        }
+        
+        // Make functions globally accessible
+        window.addRouteToMap = addRouteToMap;
+        window.clearMap = clearMap;
+
+
+        // Initialize with user's location if available
+        getCurrentLocation();
+    </script>
+</body>
+</html>

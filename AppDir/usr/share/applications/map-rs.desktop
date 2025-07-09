@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Map.rs
+Comment=A desktop map application built with GTK, Rust, and OpenStreetMap
+Exec=map-rs
+Icon=map-rs
+Categories=Utility;Geography;
+Terminal=false
